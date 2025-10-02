@@ -1,0 +1,146 @@
+name: Build Kernel for Wayne
+
+on:
+  workflow_call:
+    inputs:
+      TODO:
+        type: string
+      KSU:
+        type: string
+      KSU_SUSFS:
+        type: string
+      KSU_MANUAL_HOOK:
+        type: string
+      LAST_BUILD:
+        type: string
+
+  workflow_dispatch:
+    inputs:
+      TODO:
+        description: To do
+        default: ""
+        type: choice
+        options:
+          - "kernel"
+          - "defconfig"
+
+      KSU:
+        description: KernelSU variant
+        default: ""
+        type: choice
+        options:
+          - "None"
+          - "Next"
+          - "Suki"
+
+      KSU_SUSFS:
+        description: Include SUSFS?
+        default: "false"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+      KSU_MANUAL_HOOK:
+        description: Use KSU Manual Hooks?
+        default: "false"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+env:
+  MAN_DISABLE: true
+  DEBIAN_FRONTEND: noninteractive
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Determine Build Status
+        run: |
+          if [ "${{ toJson(github.event.inputs) }}" == "null" ]; then
+            echo "STATUS=RELEASE" >> $GITHUB_ENV
+            echo "TRIGGER=workflow_call" >> $GITHUB_ENV
+          else
+            echo "STATUS=BETA" >> $GITHUB_ENV
+            echo "TRIGGER=workflow_dispatch" >> $GITHUB_ENV
+          fi
+
+      - name: Validate Inputs and Secrets
+        env:
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }} # telegram chat id
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }} # telegram bot token
+          GH_TOKEN: ${{ secrets.GH_TOKEN }} # github token
+          KSU: ${{ inputs.KSU }}
+          KSU_SUSFS: ${{ inputs.KSU_SUSFS }}
+          KSU_MANUAL_HOOK: ${{ inputs.KSU_MANUAL_HOOK }}
+        run: |
+          _error() {
+              echo "❌ ERROR: $*"
+              let ret++
+          }
+
+          ret=0
+          # Check Secrets
+          if [[ -z "$TG_CHAT_ID" ]]; then
+            _error "Missing TG_CHAT_ID secret (Telegram Chat ID)"
+          fi
+          if [[ -z "$TG_BOT_TOKEN" ]]; then
+            _error "Missing TG_BOT_TOKEN secret (Telegram Bot Token)"
+          fi
+          if [[ -z "$GH_TOKEN" ]]; then
+            _error "Missing GH_TOKEN secret (GitHub PAT)"
+          fi
+
+          # Check KernelSU variants
+          if [[ $KSU == "None" && $KSU_SUSFS == "true" ]]; then
+              _error "Cannot use SuSFS without KernelSU"
+          fi
+          if [[ $KSU == "None" && $KSU_MANUAL_HOOK == "true" ]]; then
+            _error "Cannot use KSU Manual Hooks without KernelSU!"
+          fi
+
+          if [[ $ret -gt 0 ]]; then
+            exit $ret
+          fi
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gh bc bison flex libssl-dev libelf-dev dwarves cpio gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+
+      - name: Run Build Script
+        env:
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }} # telegram chat id
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }} # telegram bot token
+          GH_TOKEN: ${{ secrets.GH_TOKEN }} # github token
+          KSU: ${{ inputs.KSU }}
+          KSU_SUSFS: ${{ inputs.KSU_SUSFS }}
+          KSU_MANUAL_HOOK: ${{ inputs.KSU_MANUAL_HOOK }}
+          LAST_BUILD: ${{ inputs.LAST_BUILD }}
+          TODO: ${{ inputs.TODO }}
+        run: |
+          export GIT_CLONE_PROTECTION_ACTIVE=false
+          chmod +x *.sh
+          ./build.sh
+
+      - name: Upload Artifacts (ZIP & IMG)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BASE_NAME }}-${{ github.run_number }}
+          path: |
+            artifacts/*.zip
+            artifacts/*.img
+
+      - name: Upload Artifacts (Info File)
+        uses: actions/upload-artifact@v4
+        with:
+          name: info-${{ github.run_number }}
+          path: artifacts/*.txt

@@ -1,0 +1,97 @@
+name: Release Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        variant:
+          - { name: "SUKISU+SuSFS", KSU: "Suki", KSU_SUSFS: "true", KSU_MANUAL_HOOK: "true", LAST_BUILD: "false" }
+          - { name: "Vanilla", KSU: "None", KSU_SUSFS: "false", KSU_MANUAL_HOOK: "false", LAST_BUILD: "true" }
+    name: Build ${{ matrix.variant.name }} variant
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+    with:
+      KSU: ${{ matrix.variant.KSU }}
+      KSU_SUSFS: ${{ matrix.variant.KSU_SUSFS }}
+      KSU_MANUAL_HOOK: ${{ matrix.variant.KSU_MANUAL_HOOK }}
+      LAST_BUILD: ${{ matrix.variant.LAST_BUILD }}
+      TODO: "kernel"
+
+  release:
+    name: Create Unified Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout current repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release_files
+
+      - name: Extract variables from info.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          # Find the info.txt file
+          info_file=$(find release_files -name "info.txt" -type f | head -1)
+
+          if [[ -f "$info_file" ]]; then
+            echo "Found info.txt at: $info_file"
+
+            # Extract variables safely without using functions.sh
+            while IFS='=' read -r key value; do
+              # Skip empty lines and comments
+              [[ -z "$key" || "$key" =~ ^#.*$ ]] && continue
+
+              # Clean up whitespace
+              key=$(echo "$key" | xargs)
+              value=$(echo "$value" | xargs)
+
+              # Validate that we have both key and value
+              if [[ -n "$key" && -n "$value" ]]; then
+                echo "Setting: $key=$value"
+                echo "$key=$value" >> $GITHUB_ENV
+              fi
+            done < "$info_file"
+
+            echo "Variables extracted successfully"
+          fi
+
+      - name: Upload All Builds to release repo
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: ${{ env.RELEASE_REPO }}
+          name: ${{ env.RELEASE_TAG }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          prerelease: true
+          files: release_files/**/*
+          body: |
+            ## ✨ ${{ env.KERNEL_NAME }} Kernel for ${{ env.BUILD_DEVICE }} - ${{ env.RELEASE_TAG }}
+            -> Linux ${{ env.LINUX_VERSION }}
+            -> SUSFS ඞ ${{ env.SUSFS_VERSION }}
+            -> Latest SukiSU + Manual hook
+            -> Based on https://github.com/LKDenchin/scarlet_sdm660
+            
+            ### Note from the developer
+            - May not boot on some ROMs
+            - Do with Your Own Risk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+      - name: Send notification to TG (Safe)
+        run: |
+            MESSAGE="📦 Release completed! [Click](https://github.com/${{ env.RELEASE_REPO }}/releases/tag/${{ env.RELEASE_TAG }})"
+            source functions.sh
+            send_msg "$MESSAGE"
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
