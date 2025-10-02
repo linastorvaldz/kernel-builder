@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -eo pipefail
+set -e
 
 # Constants
 KERNEL_NAME="QuartiX"
