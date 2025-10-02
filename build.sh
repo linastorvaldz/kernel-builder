@@ -58,7 +58,7 @@ if [[ -z "$CLANG_BRANCH" ]]; then
   wget -qO clang-archive "$CLANG_URL"
   mkdir -p "$CLANG_DIR"
   case "$(basename $CLANG_URL)" in
-    *.tar.*)
+    *.tar.*|*.tgz)
       tar -xf clang-archive -C "$CLANG_DIR"
       ;;
     *.7z)
